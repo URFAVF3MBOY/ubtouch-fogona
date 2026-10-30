@@ -1,0 +1,30 @@
+From 0e6b47630e603a8e588217f6dbde13a0d3dbf0bd Mon Sep 17 00:00:00 2001
+From: Jami Kettunen <jami.kettunen@protonmail.com>
+Date: Tue, 28 Mar 2023 11:23:44 +0300
+Subject: [PATCH 01/18] arm64: configs: Introduce halium.config
+
+This will house all the Halium 12 / Ubuntu Touch specific kernel
+changes and is applied on top of device-specific defconfig
+---
+ arch/arm64/configs/halium.config | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+ create mode 100644 arch/arm64/configs/halium.config
+
+diff --git a/arch/arm64/configs/halium.config b/arch/arm64/configs/halium.config
+new file mode 100644
+index 000000000..0da6086a2
+--- /dev/null
++++ b/arch/arm64/configs/halium.config
+@@ -0,0 +1,9 @@
++CONFIG_PID_NS=y
++CONFIG_USER_NS=y
++CONFIG_VT=y
++CONFIG_NULL_TTY=y
++CONFIG_DEVTMPFS=y
++# CONFIG_LTO_CLANG_FULL=y will fail without a LOT of RAM
++CONFIG_LTO_CLANG_THIN=y
++# bluebinder
++CONFIG_BT_HCIVHCI=y
+-- 
+2.53.0
+

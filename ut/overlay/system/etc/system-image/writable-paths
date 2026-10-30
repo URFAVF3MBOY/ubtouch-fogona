@@ -1,0 +1,119 @@
+# 1st column: Mount point
+# 2nd column: Path relative to root of persistent storage (or auto)
+# 3rd column: type => persistent|synced|temporary
+# 4th column: action => none|transition (transition requires persistent)
+# 5th column: mount flags
+
+/var/lib/android-data                   android-data            persistent  none        none
+/etc/NetworkManager/system-connections  auto                    persistent  none        none
+/home                                   user-data               persistent  transition  none
+/media                                  auto                    temporary   none        defaults
+/opt/click.ubuntu.com                   auto                    persistent  transition  none
+/tmp                                    none                    temporary   none        defaults
+/etc/cups                               auto                    persistent  none        none
+/etc/netplan                            auto                    persistent  none        none
+/var/spool/cups                         auto                    persistent  none        none
+/var/cache/cups                         auto                    temporary   none        defaults
+/var/crash                              auto                    persistent  none        none
+/var/lib/AccountsService                auto                    persistent  transition  none
+/var/lib/aethercast                     auto                    persistent  none        none
+/var/lib/biometryd-meizu-fp-reader      auto                    persistent  none        none
+/var/lib/extrausers                     auto                    persistent  transition  none
+/var/lib/logrotate                      auto                    persistent  none        none
+/var/lib/NetworkManager                 auto                    persistent  none        none
+/var/lib/ofono                          auto                    persistent  none        none
+/var/lib/openvpn/chroot/tmp             auto                    temporary   none        defaults
+/var/lib/PackageKit                     auto                    persistent  none        none
+/var/lib/bluetooth                      auto                    persistent  none        none
+/var/lib/lightdm                        auto                    persistent  none        none
+/var/lib/lightdm-data                   auto                    persistent  none        none
+/var/lib/sudo                           auto                    temporary   none        defaults,mode=0700
+/var/lib/system-image                   auto                    persistent  none        none
+/var/lib/systemd                        auto                    synced      none        none
+/var/lib/private/systemd                auto                    persistent  transition  none
+/var/lib/upower                         auto                    persistent  none        none
+/var/lib/usb-moded                      auto                    persistent  none        none
+/var/lib/usermetrics                    auto                    persistent  none        none
+/var/lib/lomiri-location-service        auto                    persistent  none        none
+/var/log                                auto                    persistent  transition  none
+/var/tmp                                auto                    persistent  none        none
+# ufw
+/etc/default/ufw                        auto                    persistent  transition  none
+/etc/ufw                                auto                    persistent  transition  none
+/lib/ufw/user6.rules                    auto                    persistent  transition  none
+/lib/ufw/user.rules                     auto                    persistent  transition  none
+# apparmor cache is pregenerated in the image builds
+/etc/apparmor.d/cache                   auto                    persistent  transition  none
+# needed by click-apparmor - use transition since some core apps are
+# pre-installed on the image
+/var/cache/apparmor                     auto                    synced      none        none
+/var/lib/apparmor                       auto                    synced      none        none
+# for a writable dconf db used by customization
+/custom/etc/dconf                       auto                    persistent  none        none
+# ssh
+/etc/ssh                                auto                    persistent  transition  none
+# used for various writable files (timezone, localtime, ...)
+/etc/writable                           auto                    synced      none        none
+# ureadahead
+/var/lib/ureadahead                     auto                    persistent  transition  none
+# apport
+/var/lib/apport                         auto                    persistent  transition  none
+# allow us to disable apport as it slows down image
+/etc/default/apport                     auto                    persistent  none        none
+# needed for rfkill persistance
+/var/lib/rfkill                         auto                    persistent  transition  none
+# needed for urfkill persistance
+/var/lib/urfkill                        auto                    persistent  transition  none
+# needed for usb tethering
+/var/lib/misc                           auto                    persistent  transition  none
+# snappy
+/snap                                   auto                    persistent  transition  none
+/var/lib/snapd                          auto                    persistent  transition  none
+/var/snap                               auto                    persistent  transition  none
+/var/cache/snapd                        auto                    persistent  transition  none
+/etc/udev/rules.d                       auto                    persistent  transition  none
+/etc/modules-load.d                     auto                    persistent  transition  none
+/root                                   auto                    persistent  transition  none
+# nix package manager
+/nix                                    auto                    persistent  transition  none
+# nfcd
+/var/lib/nfcd                           auto                    persistent  transition  none
+# Waydroid
+/var/lib/waydroid                       auto                    persistent  none        none
+# Systemd units enable/disable. Note that using 'synced' means service enabled
+# on the read-only rootfs cannot be disabled as the symlink will be sycned back
+# at the next boot.
+/etc/systemd/system                     auto                    synced      none        none
+# systemd-binfmt support
+# Note for porters: Requires binfmt_misc kernel module present and loaded into the kernel
+# This allows persistent files to be placed for binary support to be extended, for example
+# by click packages that wish to provide interpreters for scripting languages or binaries.
+# This doesn't require synced as a pristine environment (after device reset for example)
+# should lead to the same result in the filesystem layout.
+/etc/binfmt.d                           auto                    persistent  none        none
+
+# Allow disabling user autologin
+/etc/lightdm/lightdm.conf.d             auto                    persistent  transition  none
+
+# Allow changing the hosts file
+/etc/hosts                              auto                    persistent  transition  none
+
+# Port-specific device-hacks generated and user configuration of key remapping daemon
+/etc/keyd                               auto                    persistent  transition  none
+
+# So, we're upgrading from a system without systemd to one with, and we want to make
+# sure that /etc/machine-id matches DBus's machine-id. Normally, systemd would look
+# into DBus's machine-id and copy that. However, systemd does that very early before
+# processing mount points and so will miss this ID if it's in /var/lib. So, instead
+# of the original entry of /var/lib/dbus directory, we bind-mount /etc/machine-id
+# to the old path so that /etc/machine-id shows the same value right away.
+# A symlink exists in our new rootfs that will point DBus's machine-id to
+# /etc/machine-id.
+#
+# We have a provision in writable-paths processor that /etc paths will be mounted
+# early for this kind of thing, so this line will ensure that it'll be available by
+# the time systemd checks for it.
+/etc/machine-id            system-data/var/lib/dbus/machine-id  persistent  none        none
+/var/lib/flatpak                        auto                    persistent  none        none
+/var/cache/apt                          auto                    persistent  none        none
+/var/lib/apt/lists                      auto                    persistent  none        none

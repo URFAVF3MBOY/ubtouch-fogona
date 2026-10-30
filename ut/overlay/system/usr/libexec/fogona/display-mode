@@ -1,0 +1,97 @@
+#!/usr/bin/python3
+"""List or set the primary display's composer config (refresh rate).
+
+usage: display-mode            list configs
+       display-mode HZ         make the config closest to HZ active
+
+Mir's Android backend (libhybris hwc2_compat) can only read the active
+config, so the panel stays at the composer's default 60 Hz. Talk to the
+vendor composer HAL directly over hwbinder with libgbinder instead. The
+composer accepts a single client, so run this before the system compositor.
+"""
+import ctypes
+import sys
+
+g = ctypes.CDLL("libgbinder.so.1")
+P = ctypes.c_void_p
+for name, res, args in [
+        ("gbinder_servicemanager_new", P, [ctypes.c_char_p]),
+        ("gbinder_servicemanager_get_service_sync", P, [P, ctypes.c_char_p, ctypes.POINTER(ctypes.c_int)]),
+        ("gbinder_client_new", P, [P, ctypes.c_char_p]),
+        ("gbinder_client_new_request", P, [P]),
+        ("gbinder_local_request_append_int32", P, [P, ctypes.c_uint32]),
+        ("gbinder_local_request_append_int64", P, [P, ctypes.c_uint64]),
+        ("gbinder_client_transact_sync_reply", P, [P, ctypes.c_uint32, P, ctypes.POINTER(ctypes.c_int)]),
+        ("gbinder_remote_reply_init_reader", None, [P, P]),
+        ("gbinder_reader_read_int32", ctypes.c_int, [P, ctypes.POINTER(ctypes.c_int32)]),
+        ("gbinder_reader_read_object", P, [P]),
+        ("gbinder_reader_read_hidl_vec", P, [P, ctypes.POINTER(ctypes.c_size_t), ctypes.POINTER(ctypes.c_size_t)])]:
+    f = getattr(g, name)
+    f.restype, f.argtypes = res, args
+
+COMPOSER = b"android.hardware.graphics.composer@2.1::IComposer"
+CLIENT = b"android.hardware.graphics.composer@2.1::IComposerClient"
+CREATE_CLIENT = 3  # IComposer
+GET_ACTIVE_CONFIG, GET_DISPLAY_ATTRIBUTE, GET_DISPLAY_CONFIGS, SET_ACTIVE_CONFIG = 7, 10, 11, 17
+WIDTH, HEIGHT, VSYNC_PERIOD = 1, 2, 3
+DISPLAY = 0  # primary
+
+
+def call(client, code, *args):
+    """args: ('i', v) / ('l', v); returns a reader positioned after HIDL status + Error."""
+    req = g.gbinder_client_new_request(client)
+    for kind, v in args:
+        (g.gbinder_local_request_append_int64 if kind == "l" else g.gbinder_local_request_append_int32)(req, v)
+    st = ctypes.c_int()
+    reply = g.gbinder_client_transact_sync_reply(client, code, req, ctypes.byref(st))
+    if not reply or st.value:
+        sys.exit(f"transaction {code} failed: {st.value}")
+    reader = ctypes.create_string_buffer(128)
+    g.gbinder_remote_reply_init_reader(reply, reader)
+    status, err = ctypes.c_int32(), ctypes.c_int32()
+    g.gbinder_reader_read_int32(reader, ctypes.byref(status))
+    g.gbinder_reader_read_int32(reader, ctypes.byref(err))
+    if status.value or err.value:
+        sys.exit(f"call {code}: hidl status {status.value}, composer error {err.value}")
+    return reader
+
+
+def read_i32(reader):
+    v = ctypes.c_int32()
+    g.gbinder_reader_read_int32(reader, ctypes.byref(v))
+    return v.value
+
+
+def main():
+    sm = g.gbinder_servicemanager_new(b"/dev/hwbinder")
+    st = ctypes.c_int()
+    composer = g.gbinder_servicemanager_get_service_sync(sm, COMPOSER + b"/default", ctypes.byref(st))
+    if not composer:
+        sys.exit("composer service not found")
+    reader = call(g.gbinder_client_new(composer, COMPOSER), CREATE_CLIENT)
+    obj = g.gbinder_reader_read_object(reader)
+    if not obj:
+        sys.exit("no composer client (another client, e.g. the compositor, is connected)")
+    client = g.gbinder_client_new(obj, CLIENT)
+
+    n, size = ctypes.c_size_t(), ctypes.c_size_t()
+    vec = g.gbinder_reader_read_hidl_vec(call(client, GET_DISPLAY_CONFIGS, ("l", DISPLAY)),
+                                         ctypes.byref(n), ctypes.byref(size))
+    configs = list((ctypes.c_uint32 * n.value).from_address(vec)) if n.value else []
+    active = read_i32(call(client, GET_ACTIVE_CONFIG, ("l", DISPLAY)))
+    modes = {}
+    for c in configs:
+        attr = lambda a: read_i32(call(client, GET_DISPLAY_ATTRIBUTE, ("l", DISPLAY), ("i", c), ("i", a)))
+        hz = 1e9 / attr(VSYNC_PERIOD)
+        modes[c] = hz
+        print(f"config {c}: {attr(WIDTH)}x{attr(HEIGHT)} @ {hz:.1f} Hz{'  (active)' if c == active else ''}")
+    if len(sys.argv) > 1:
+        want = float(sys.argv[1])
+        best = min(modes, key=lambda c: abs(modes[c] - want))
+        if best != active:
+            call(client, SET_ACTIVE_CONFIG, ("l", DISPLAY), ("i", best))
+        print(f"active: config {best} ({modes[best]:.1f} Hz)")
+
+
+if __name__ == "__main__":
+    main()

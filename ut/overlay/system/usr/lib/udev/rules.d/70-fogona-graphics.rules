@@ -1,0 +1,5 @@
+# GPU and buffer allocators must be usable by the phablet user, or Lomiri's
+# Adreno EGL init fails (the system compositor only works because it is root).
+ACTION=="add", KERNEL=="kgsl", MODE="0666"
+ACTION=="add", KERNEL=="kgsl-3d0", MODE="0666"
+ACTION=="add", SUBSYSTEM=="dma_heap", MODE="0444"

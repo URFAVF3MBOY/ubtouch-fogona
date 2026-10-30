@@ -1,0 +1,9 @@
+# Qualcomm out-of-tree driver repos, as  <path in Android tree>  <git url>  <ref>
+# Motorola publishes most at the firmware tag. display-drivers and mm-drivers aren't
+# published for this release, so they come from CodeLinaro at the Qualcomm vendor
+# tag matching Moto's graphics-kernel base (merged commit ac65b154, 2024-01-03).
+vendor/qcom/opensource/display-drivers  https://git.codelinaro.org/clo/la/platform/vendor/opensource/display-drivers.git  LA.VENDOR.13.2.1.r1-09300-DIVAR.QSSI14.0
+vendor/qcom/opensource/graphics-kernel  https://github.com/MotorolaMobilityLLC/vendor-qcom-opensource-graphics-kernel.git  MMI-U1TFS34.100-35-14-1-21
+vendor/qcom/opensource/securemsm-kernel https://github.com/MotorolaMobilityLLC/vendor-qcom-opensource-securemsm-kernel.git MMI-U1TFS34.100-35-14-1-21
+vendor/qcom/opensource/mmrm-driver      https://github.com/MotorolaMobilityLLC/vendor-qcom-opensource-mmrm-driver.git      MMI-U1TFS34.100-35-14-1-21
+vendor/qcom/opensource/video-driver     https://github.com/MotorolaMobilityLLC/vendor-qcom-opensource-video-driver.git     MMI-U1TFS34.100-35-14-1-21

@@ -1,0 +1,2 @@
+# Stub: the stock vendor script sets up its own USB gadget (g1) inside the
+# Android container, which collides with Ubuntu Touch usb-moded (adb/MTP/RNDIS).

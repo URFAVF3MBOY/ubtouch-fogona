@@ -1,0 +1,52 @@
+From a7589e4c1b3a0ec4ff3372ca5596e57a360e306e Mon Sep 17 00:00:00 2001
+From: TheKit <thekit@disroot.org>
+Date: Sun, 25 Aug 2024 18:03:55 +0000
+Subject: [PATCH 11/18] (halium) gki_quirks: hook find_get_pid for mali_kbase
+
+As found on Pixel 6/7, mali_kbase mistakenly uses find_get_pid
+with the global ids from task_struct of "current" instead of
+virtual (per-namespace) pids it expects.
+
+Fixes a crash in gpu_dvfs_kctx_init with PID namespaces enabled.
+---
+ kernel/gki_quirks.c | 17 +++++++++++++++++
+ 1 file changed, 17 insertions(+)
+
+diff --git a/kernel/gki_quirks.c b/kernel/gki_quirks.c
+index 45a2ec8a0..cdbe02144 100644
+--- a/kernel/gki_quirks.c
++++ b/kernel/gki_quirks.c
+@@ -2,6 +2,17 @@
+ 
+ #include <linux/module.h>
+ 
++static struct pid *find_get_pid_global_ns(pid_t nr)
++{
++	struct pid *pid;
++
++	rcu_read_lock();
++	pid = get_pid(find_pid_ns(nr, &init_pid_ns));
++	rcu_read_unlock();
++
++	return pid;
++}
++
+ struct gki_quirks_hook {
+ 	const char *module_name;
+ 	const char *symbol_name;
+@@ -9,6 +20,12 @@ struct gki_quirks_hook {
+ };
+ 
+ static const struct gki_quirks_hook gki_quirks_list[] = {
++	/*
++	 * Pixel 6/7: mali_kbase mistakenly uses find_get_pid
++	 * with the global ids from task_struct of "current".
++	 */
++	{ "mali_kbase", "find_get_pid", find_get_pid_global_ns },
++
+ 	{ } /* terminating entry must be last */
+ };
+ 
+-- 
+2.53.0
+

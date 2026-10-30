@@ -1,0 +1,8 @@
+# Qualcomm AudioReach (AGM/PAL) nodes: PulseAudio loads the audio HAL in the
+# phablet session, so these must not stay root-only (Android's ueventd would
+# normally set them up). Without them gsl_init fails and adev_open -EINVAL.
+ACTION=="add", KERNEL=="aud_pasthru_adsp", GROUP="audio", MODE="0660"
+ACTION=="add", KERNEL=="msm_audio_ion", GROUP="audio", MODE="0660"
+ACTION=="add", KERNEL=="msm_audio_ion_cma", GROUP="audio", MODE="0660"
+ACTION=="add", KERNEL=="msm_adsp_sleepmon", GROUP="audio", MODE="0660"
+ACTION=="add", KERNEL=="adsprpc-smd", MODE="0666"

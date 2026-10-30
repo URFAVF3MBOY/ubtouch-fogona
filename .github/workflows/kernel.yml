@@ -1,0 +1,226 @@
+name: kernel
+
+on:
+  push:
+    paths: [configs/**, patches/**, vendor/**, tools/build_ext_modules.sh, .github/workflows/kernel.yml]
+  workflow_dispatch:
+
+env:
+  KERNEL_TAG: MMI-U1TFS34.100-35-14-1-21
+  CLANG_VERSION: clang-r450784e
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 150
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # ubtouch: Motorola's 5.15.185 source + UBports' ABI-preserving Halium patches,
+          #          runs with the phone's stock vendor modules (the Ubuntu Touch kernel)
+          - variant: ubtouch
+            repo: https://github.com/MotorolaMobilityLLC/kernel-msm.git
+            ref: MMI-U1TFS34.100-35-14-1-21
+            patches: patches/ubports-halium
+            fragments: arch/arm64/configs/halium.config ../configs/ubports-extra.config
+            checked: ubports-extra.config
+            cache_fallback: stock
+          # ubtouch-serial: ubtouch + a live boot log over USB serial (debug builds)
+          - variant: ubtouch-serial
+            repo: https://github.com/MotorolaMobilityLLC/kernel-msm.git
+            ref: MMI-U1TFS34.100-35-14-1-21
+            patches: patches/ubports-halium
+            fragments: arch/arm64/configs/halium.config ../configs/ubports-extra.config ../configs/serial-console.config
+            checked: serial-console.config
+            cache_fallback: ubtouch
+          # stock: phone's own config on Motorola source; boots Android with stock modules
+          - variant: stock
+            repo: https://github.com/MotorolaMobilityLLC/kernel-msm.git
+            ref: MMI-U1TFS34.100-35-14-1-21
+            fragments: ../configs/stock-build.config
+            checked: stock-build.config
+          # Not built by default (see git history): "halium" rebuilds every vendor module
+          # against our own halium.config; "ubports*" used UBports' 5.15.178 tree.
+    env:
+      FRAGMENTS: ${{ matrix.fragments }}
+      CHECKED: ${{ matrix.checked }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Add swap
+        run: |
+          sudo swapoff -a || true
+          sudo fallocate -l 8G /swapfile2 && sudo chmod 600 /swapfile2
+          sudo mkswap /swapfile2 && sudo swapon /swapfile2
+          free -h
+
+      - name: Install host packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bc bison flex libssl-dev libelf-dev dwarves cpio lz4 python3 ccache
+
+      - name: Fetch kernel source
+        run: git clone --depth 1 -b "${{ matrix.ref }}" "${{ matrix.repo }}" kernel
+
+      - name: Apply patches
+        if: matrix.patches
+        run: |
+          cd kernel
+          git -c user.email=ci@localhost -c user.name=ci am -3 --committer-date-is-author-date ../${{ matrix.patches }}/*.patch
+
+      # A fresh clone gives every file a new mtime, which makes kbuild rebuild
+      # everything even with the previous build dir restored. Pin each file's
+      # mtime to the last commit that touched it so unchanged files stay unchanged.
+      - name: Pin source mtimes
+        working-directory: kernel
+        run: |
+          root=$(git rev-list --max-parents=0 HEAD)
+          git ls-files -z | xargs -0 touch -h -d "@$(git log -1 --format=%ct "$root")"
+          for c in $(git rev-list --reverse "$root"..HEAD); do
+            git diff-tree --no-commit-id --name-only -r "$c" | xargs -r touch -h -d "@$(git log -1 --format=%ct "$c")"
+          done
+
+      - name: Cache AOSP clang
+        id: clang-cache
+        uses: actions/cache@v4
+        with:
+          path: clang
+          key: ${{ env.CLANG_VERSION }}
+
+      # Each run saves a new ccache snapshot; restore-keys picks the newest one,
+      # so only files affected by a config/source change get recompiled.
+      - name: Restore ccache
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.cache/ccache
+          key: ccache-${{ matrix.variant }}-${{ env.KERNEL_TAG }}-${{ github.run_id }}
+          restore-keys: |
+            ccache-${{ matrix.variant }}-${{ env.KERNEL_TAG }}-
+            ccache-${{ matrix.cache_fallback || matrix.variant }}-${{ env.KERNEL_TAG }}-
+            ccache-${{ env.KERNEL_TAG }}-
+
+      # The previous build dir lets kbuild rebuild only what a config/source change
+      # touches (per-option dependency tracking), which ccache alone can't do since
+      # every file includes autoconf.h. It also holds the ThinLTO link cache.
+      - name: Restore build dir
+        uses: actions/cache/restore@v4
+        with:
+          path: kernel/out
+          key: out-${{ matrix.variant }}-${{ env.KERNEL_TAG }}-${{ github.run_id }}
+          restore-keys: |
+            out-${{ matrix.variant }}-${{ env.KERNEL_TAG }}-
+            out-${{ matrix.cache_fallback || matrix.variant }}-${{ env.KERNEL_TAG }}-
+
+      - name: Fetch AOSP clang
+        if: steps.clang-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir clang
+          for br in master-kernel-build-2022 android13-release main; do
+            url="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/$br/$CLANG_VERSION.tgz"
+            if curl -fsSL "$url" | tar -xz -C clang; then echo "clang from $br"; break; fi
+          done
+          clang/bin/clang --version
+
+      - name: Configure
+        working-directory: kernel
+        run: |
+          export PATH="$GITHUB_WORKSPACE/clang/bin:$PATH"
+          M="ARCH=arm64 LLVM=1 LLVM_IAS=1 O=out"
+          mkdir -p out
+          if [ "${{ matrix.base }}" = gki_defconfig ]; then
+            make $M gki_defconfig
+          else
+            cp ../configs/stock-fogona.config out/.config
+          fi
+          scripts/kconfig/merge_config.sh -m -O out out/.config $FRAGMENTS
+          make $M olddefconfig
+          # Report any requested option that did not stick (missing deps etc.)
+          grep -E '^CONFIG_' ../configs/$CHECKED | while IFS== read -r k v; do
+            want="$k=$v"; [ "$v" = n ] && want="# $k is not set"
+            grep -qxF "$want" out/.config || echo "::warning::$k wanted $v, got: $(grep -E "^(# )?$k[= ]" out/.config)"
+          done
+
+      - name: Build
+        working-directory: kernel
+        run: |
+          export PATH="$GITHUB_WORKSPACE/clang/bin:$PATH"
+          export CCACHE_COMPILERCHECK=content CCACHE_MAXSIZE=4G CCACHE_NOHASHDIR=1
+          export KBUILD_BUILD_TIMESTAMP="2026-01-01" KBUILD_BUILD_USER=ci KBUILD_BUILD_HOST=ci
+          ccache -z
+          set -o pipefail
+          rc=0
+          make ARCH=arm64 LLVM=1 LLVM_IAS=1 O=out CC="ccache clang" -j"$(nproc)" Image modules > ../build.log 2>&1 || rc=$?
+          ccache -s
+          if [ $rc -ne 0 ]; then grep -nE 'error:|Error [0-9]' ../build.log | head -40; tail -60 ../build.log; exit $rc; fi
+          test -f out/arch/arm64/boot/Image
+
+      # Motorola's out-of-tree drivers (charger, fuel gauge, touch, Type-C, ...).
+      # Their Kbuild files expect an Android tree with the repo at motorola/kernel/modules.
+      - name: Build Motorola modules
+        if: matrix.variant == 'halium'
+        continue-on-error: true
+        run: |
+          export PATH="$GITHUB_WORKSPACE/clang/bin:$PATH"
+          export CCACHE_COMPILERCHECK=content CCACHE_MAXSIZE=4G CCACHE_NOHASHDIR=1
+          export ANDROID_BUILD_TOP="$GITHUB_WORKSPACE/top"
+          mkdir -p top/motorola/kernel
+          git clone -q --depth 1 -b "$KERNEL_TAG" https://github.com/MotorolaMobilityLLC/motorola-kernel-modules.git top/motorola/kernel/modules
+          bash tools/build_ext_modules.sh kernel kernel/out top/motorola/kernel/modules vendor/moto-modules.txt dist-moto
+
+      # Qualcomm techpack drivers (display, GPU, video, ...), see vendor/qcom-repos.txt
+      - name: Build Qualcomm modules
+        if: matrix.variant == 'halium'
+        continue-on-error: true
+        run: |
+          export PATH="$GITHUB_WORKSPACE/clang/bin:$PATH"
+          export CCACHE_COMPILERCHECK=content CCACHE_MAXSIZE=4G CCACHE_NOHASHDIR=1
+          export ANDROID_BUILD_TOP="$GITHUB_WORKSPACE/top"
+          grep -vE '^\s*(#|$)' vendor/qcom-repos.txt | while read -r path url ref; do
+            git clone -q --depth 1 -b "$ref" "$url" "top/$path" || echo "::warning::clone failed: $path"
+          done
+          # mmrm's Kbuild always descends into test/, which lives in a separate repo
+          mkdir -p top/vendor/qcom/opensource/mmrm-driver/test && touch top/vendor/qcom/opensource/mmrm-driver/test/Kbuild
+          bash tools/build_ext_modules.sh kernel kernel/out top vendor/qcom-modules.txt dist-qcom
+
+      - name: Save build dir
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: kernel/out
+          key: out-${{ matrix.variant }}-${{ env.KERNEL_TAG }}-${{ github.run_id }}
+
+      # Saved even when the build fails, so the next run resumes from here.
+      - name: Save ccache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.cache/ccache
+          key: ccache-${{ matrix.variant }}-${{ env.KERNEL_TAG }}-${{ github.run_id }}
+
+      - name: Halium kernel config check
+        if: matrix.variant == 'halium'
+        continue-on-error: true
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/Halium/halium-boot/master/check-kernel-config -o check-kernel-config
+          cp kernel/out/.config checked.config
+          bash check-kernel-config checked.config 2>&1 | tee config-check.txt
+
+      - name: Collect artifacts
+        if: always()
+        run: |
+          mkdir -p dist
+          cp kernel/out/arch/arm64/boot/Image kernel/out/Module.symvers dist/ 2>/dev/null || true
+          # upload-artifact skips dotfiles
+          cp kernel/out/.config dist/kernel.config 2>/dev/null || true
+          cp build.log config-check.txt dist/ 2>/dev/null || true
+          (cd kernel/out && find . -name '*.ko' | tar -cJf ../../dist/in-tree-modules.tar.xz -T -) || true
+          cat kernel/out/include/config/kernel.release > dist/kernel.release 2>/dev/null || true
+          [ -d dist-moto ] && tar -cJf dist/moto-modules.tar.xz -C dist-moto . || true
+          [ -d dist-qcom ] && tar -cJf dist/qcom-modules.tar.xz -C dist-qcom . || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: kernel-fogona-${{ matrix.variant }}
+          path: dist/

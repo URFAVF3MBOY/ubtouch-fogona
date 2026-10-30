@@ -1,0 +1,50 @@
+From 8115927f419a48e2dea120438248ac5936fd240c Mon Sep 17 00:00:00 2001
+From: TheKit <thekit@disroot.org>
+Date: Wed, 23 Sep 2026 11:23:08 +0300
+Subject: [PATCH 16/18] Revert "(halium) GKI: use Android ABI padding for
+ SYSVIPC task_struct fields"
+
+This reverts commit f6672c5863a7fa90569beca3aead59ee6a4ad60c.
+---
+ include/linux/sched.h | 15 ++-------------
+ 1 file changed, 2 insertions(+), 13 deletions(-)
+
+diff --git a/include/linux/sched.h b/include/linux/sched.h
+index 467398210..9c315023a 100644
+--- a/include/linux/sched.h
++++ b/include/linux/sched.h
+@@ -1074,10 +1074,8 @@ struct task_struct {
+ 	struct nameidata		*nameidata;
+ 
+ #ifdef CONFIG_SYSVIPC
+-	// struct sysv_sem			sysvsem;
+-	/* sysvsem is in the ANDROID_KABI_RESERVE(1) field below */
+-	// struct sysv_shm			sysvshm;
+-	/* sysvshm is in the ANDROID_KABI_RESERVE(1) field below */
++	struct sysv_sem			sysvsem;
++	struct sysv_shm			sysvshm;
+ #endif
+ #ifdef CONFIG_DETECT_HUNG_TASK
+ 	unsigned long			last_switch_count;
+@@ -1515,18 +1513,9 @@ struct task_struct {
+ 	ANDROID_KABI_RESERVE(3);
+ 	ANDROID_KABI_RESERVE(4);
+ 	ANDROID_KABI_RESERVE(5);
+-
+-#if defined(CONFIG_SYSVIPC)
+-	// struct sysv_sem			sysvsem;
+-	ANDROID_KABI_USE(6, struct sysv_sem sysvsem);
+-	// struct sysv_shm			sysvshm;
+-	_ANDROID_KABI_REPLACE(ANDROID_KABI_RESERVE(7); ANDROID_KABI_RESERVE(8),
+-						  struct sysv_shm sysvshm);
+-#else
+ 	ANDROID_KABI_RESERVE(6);
+ 	ANDROID_KABI_RESERVE(7);
+ 	ANDROID_KABI_RESERVE(8);
+-#endif
+ 
+ 	/*
+ 	 * New fields for task_struct should be added above here, so that
+-- 
+2.53.0
+

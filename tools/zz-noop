@@ -1,0 +1,4 @@
+#!/bin/sh
+# fogona debug logging removed; kept as a no-op so the hook order stays valid
+case $1 in prereqs) exit 0 ;; esac
+exit 0

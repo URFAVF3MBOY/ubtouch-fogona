@@ -1,0 +1,12 @@
+# Stock vendor vndservicemanager aborts on selinux_status_open() because the
+# Halium kernel runs AppArmor; preload the Halium image's SELinux stubs.
+service vndservicemanager /vendor/bin/vndservicemanager /dev/vndbinder
+    setenv LD_PRELOAD libselinux_stubs.so
+    class core
+    user system
+    group system readproc
+    writepid /dev/cpuset/system-background/tasks
+    onrestart class_restart main
+    onrestart class_restart hal
+    onrestart class_restart early_hal
+    shutdown critical

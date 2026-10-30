@@ -1,0 +1,24 @@
+From 6f2dacb01350a34cd8e91f9da934700497498f3b Mon Sep 17 00:00:00 2001
+From: Jami Kettunen <jami.kettunen@protonmail.com>
+Date: Fri, 13 Feb 2026 15:53:10 +0200
+Subject: [PATCH 09/18] halium.config: enable AppArmor
+
+---
+ arch/arm64/configs/halium.config | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/arch/arm64/configs/halium.config b/arch/arm64/configs/halium.config
+index 5350ba3be..1ac2b069d 100644
+--- a/arch/arm64/configs/halium.config
++++ b/arch/arm64/configs/halium.config
+@@ -8,3 +8,7 @@ CONFIG_DEVTMPFS=y
+ CONFIG_LTO_CLANG_THIN=y
+ # bluebinder
+ CONFIG_BT_HCIVHCI=y
++# AppArmor
++CONFIG_SECURITY_APPARMOR=y
++CONFIG_DEFAULT_SECURITY_APPARMOR=y
++CONFIG_LSM="landlock,lockdown,yama,loadpin,safesetid,integrity,apparmor,selinux,smack,tomoyo,bpf"
+-- 
+2.53.0
+

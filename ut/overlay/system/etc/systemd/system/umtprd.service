@@ -1,0 +1,16 @@
+[Unit]
+Description=uMTP-Responder (MTP file transfer over FunctionFS)
+After=usb-moded.service
+Wants=usb-moded.service
+
+[Service]
+ExecStartPre=/usr/libexec/fogona/umtprd-functionfs
+ExecStart=/usr/bin/umtprd
+# usb-moded may have tried "mtp" before umtprd was up: re-apply the mode
+ExecStartPost=/bin/sh -c 'sleep 2; case "$(usb_moded_util -q)" in *mtp*|*developer*) systemctl restart usb-moded ;; esac'
+ExecStopPost=-/bin/umount /dev/usb-ffs/mtp
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

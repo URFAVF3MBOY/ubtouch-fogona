@@ -1,0 +1,10 @@
+#!/bin/sh
+# Responsiveness tuning, applied after Android's init.qcom.post_boot.sh
+# (which runs in the container and would overwrite these).
+W=/proc/sys/walt/input_boost
+# on touch: lift both CPU clusters for 120 ms and prefer the big cores
+echo "1190000 0 0 0 1344000 0 0 0" > $W/input_boost_freq
+echo 120 > $W/input_boost_ms
+echo 1 > $W/sched_boost_on_input
+# GPU floor 465 MHz instead of 320 MHz so scrolling starts smoothly
+echo 465000000 > /sys/class/kgsl/kgsl-3d0/devfreq/min_freq

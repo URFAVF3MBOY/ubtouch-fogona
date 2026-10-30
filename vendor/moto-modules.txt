@@ -1,0 +1,39 @@
+# Motorola out-of-tree modules shipped on stock fogona, as
+#   <dir in motorola-kernel-modules>  [KBUILD options from the driver's Android.mk]
+# Options stand in for the device BoardConfig flags, which Motorola doesn't publish.
+# @KSRC@ is replaced with the kernel source dir (some drivers include kernel-internal headers).
+drivers/mmi_info
+drivers/mmi_annotate
+drivers/mmi_relay
+drivers/sensors
+drivers/misc/utag
+drivers/power/wakeup_sources
+drivers/usb/typec/adapter_class
+drivers/usb/typec/mmi_tcpc CONFIG_TCPC_CLASS=y CONFIG_TCPC_AW35616=y CONFIG_TCPC_SGM7220=y
+drivers/power/mmi_charger
+drivers/power/mmi_discrete_charger
+drivers/power/bq2589x_chg_mmi
+drivers/power/sgm4154x_chg_mmi
+drivers/power/cw2217b_fg_mmi
+drivers/power/rt9426a_fg_mmi
+drivers/power/sm5602_fg_mmi
+# drivers/power/qpnp_adaptive_charge   (needs linux/mmi-pmic-voter.h from elsewhere; PMIC charger, unused on fogona)
+drivers/power/bm_adsp_ulog
+drivers/input/touchscreen/ilitek_v3_mmi
+drivers/input/touchscreen/nova_0flash_mmi
+drivers/input/touchscreen/chipone_tddi_v2_mmi KCFLAGS=-Wno-error
+drivers/input/misc/qpnp_power_on_mmi
+drivers/input/misc/fpc_fps_mmi
+drivers/input/misc/chipone_fps_mmi_v1
+drivers/misc/aw9610x KCFLAGS=-I@KSRC@/drivers/base
+drivers/misc/sx933x KCFLAGS=-I@KSRC@/drivers/base
+drivers/misc/ldo_vibrator_mmi
+drivers/misc/mmi_sys_temp
+drivers/misc/tps61280a
+drivers/moto_f_usbnet
+drivers/moto_mm
+drivers/moto_mmap_fault
+drivers/moto_sched KCFLAGS=-I@KSRC@
+# drivers/moto_swap   (needs Moto's hybridswap memcg kernel hooks)
+drivers/nfc/st21nfc
+drivers/watchdogtest

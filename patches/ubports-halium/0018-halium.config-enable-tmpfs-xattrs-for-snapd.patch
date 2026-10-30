@@ -1,0 +1,29 @@
+From 260c66c249a285a3f54c486064ed97ac732c1960 Mon Sep 17 00:00:00 2001
+From: TheKit <thekit@disroot.org>
+Date: Wed, 14 Oct 2026 12:14:49 +0300
+Subject: [PATCH 18/18] halium.config: enable tmpfs xattrs for snapd
+
+UT's snap-confine-workaround copies snap-confine to a tmpfs and sets
+its file capabilities there. Without TMPFS_XATTR setcap fails with
+EOPNOTSUPP and snapd never starts. Only mm/shmem.c uses the option,
+so module CRCs are unaffected.
+---
+ arch/arm64/configs/halium.config | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/arch/arm64/configs/halium.config b/arch/arm64/configs/halium.config
+index 5f5215e89..54a185716 100644
+--- a/arch/arm64/configs/halium.config
++++ b/arch/arm64/configs/halium.config
+@@ -28,6 +28,8 @@ CONFIG_SQUASHFS_LZ4=y
+ CONFIG_SQUASHFS_LZO=y
+ CONFIG_SQUASHFS_XZ=y
+ CONFIG_SQUASHFS_ZSTD=y
++# snap-confine-workaround sets file caps on a tmpfs copy
++CONFIG_TMPFS_XATTR=y
+ # FIXME: breaks GKI ABI somehow, needed by some snaps like btop & qtcreator
+ #CONFIG_CGROUP_DEVICE=y
+ 
+-- 
+2.53.0
+

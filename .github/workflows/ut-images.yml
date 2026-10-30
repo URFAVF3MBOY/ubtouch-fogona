@@ -1,0 +1,85 @@
+name: ut-images
+
+# Builds the flashable Ubuntu Touch images with UBports'
+# halium-generic-adaptation-build-tools, using the "ubtouch" kernel from the
+# kernel workflow instead of letting the tools build a kernel.
+on:
+  push:
+    paths: [ut/**, .github/workflows/ut-images.yml]
+  workflow_dispatch:
+  workflow_run:
+    workflows: [kernel]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  images:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    defaults:
+      run:
+        working-directory: ut
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install host packages
+        working-directory: .
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y android-sdk-libsparse-utils e2fsprogs fakeroot wget lz4 xz-utils cpio python3 git
+
+      - name: Fetch ubtouch kernel
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          id=$(gh run list -R "$GITHUB_REPOSITORY" -w kernel.yml -s success -b main -L 1 --json databaseId -q '.[0].databaseId')
+          echo "kernel run: $id"
+          gh run download "$id" -R "$GITHUB_REPOSITORY" -n kernel-fogona-ubtouch -D ../kernel-artifact
+          cat ../kernel-artifact/kernel.release
+          mkdir -p workdir/downloads/KERNEL_OBJ/arch/arm64/boot workdir/tmp/system workdir/tmp/partitions
+          cp ../kernel-artifact/Image workdir/downloads/KERNEL_OBJ/arch/arm64/boot/Image
+
+      - name: Fetch build tools, mkbootimg and Halium ramdisk
+        run: |
+          source deviceinfo
+          git clone --depth 1 https://gitlab.com/ubports/porting/community-ports/halium-generic-adaptation-build-tools build
+          git clone --depth 1 -b lineage-20.0 https://github.com/LineageOS/android_system_tools_mkbootimg workdir/downloads/android_system_tools_mkbootimg
+          git clone --depth 1 -b android13-gsi https://android.googlesource.com/platform/external/avb workdir/downloads/avb
+          curl -fsSL -o workdir/downloads/halium-boot-ramdisk.img "$deviceinfo_prebuilt_boot_ramdisk_source"
+
+      - name: Make boot.img and init_boot.img
+        run: |
+          ./build/make-bootimage.sh workdir/downloads workdir/downloads/KERNEL_OBJ \
+            workdir/downloads/halium-boot-ramdisk.img workdir/tmp/partitions/boot.img workdir/tmp/system
+          ls -la workdir/tmp/partitions
+
+      - name: Device tarball
+        run: mkdir -p out && ./build/build-tarball-mainline.sh fogona out workdir/tmp usrmerge
+
+      - name: Fetch Ubuntu Touch rootfs + Halium system image
+        run: ./build/prepare-fake-ota.sh out/device_fogona.tar.xz ota
+
+      - name: Make system.img
+        run: |
+          sudo ./build/system-image-from-ota.sh ota/ubuntu_command images
+          sudo chown -R "$(id -u):$(id -g)" images
+          ls -la images
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ut-boot-images
+          path: |
+            ut/images/boot.img
+            ut/images/init_boot.img
+            kernel-artifact/kernel.release
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ut-system-image
+          path: ut/images/system.img
+          compression-level: 9

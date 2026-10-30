@@ -1,0 +1,13 @@
+[Unit]
+Description=fogona LiPo battery percentage (voltage based)
+Before=upower.service
+
+[Service]
+ExecStart=/usr/libexec/fogona-battery
+ExecStopPost=-/bin/umount /sys/class/power_supply/battery/capacity
+ExecStopPost=-/bin/umount /sys/class/power_supply/battery/status
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

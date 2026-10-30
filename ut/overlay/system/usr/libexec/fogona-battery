@@ -1,0 +1,97 @@
+#!/usr/bin/python3
+"""Battery percentage for fogona's replacement LiPo.
+
+The phone runs on a 1S LiPo (4.20 V max) without the original pack's ID
+resistor and thermistor, so the Qualcomm fuel gauge reports a fixed fake
+capacity (46%). UPower, the indicator and low-battery shutdown all read
+/sys/class/power_supply/battery/{capacity,status}, so bind-mount files over
+those and fill them with an estimate from the cell's open-circuit voltage.
+Charging stays capped at 4.20 V by the kernel (dtbo voltage_max).
+"""
+import os
+import subprocess
+import time
+
+PS = "/sys/class/power_supply"
+RUN = "/run/fogona-battery"
+# Resting 1S LiPo voltage (V) -> state of charge (%)
+OCV = [(3.27, 0), (3.61, 5), (3.69, 10), (3.71, 15), (3.73, 20), (3.75, 25),
+       (3.77, 30), (3.79, 35), (3.80, 40), (3.82, 45), (3.84, 50), (3.85, 55),
+       (3.87, 60), (3.91, 65), (3.95, 70), (3.98, 75), (4.02, 80), (4.08, 85),
+       (4.11, 90), (4.15, 95), (4.20, 100)]
+R_INTERNAL = 0.10  # ohm, cell + wiring; corrects load sag / charge lift
+FULL_V = 4.15      # at the charger's CV limit with ~no current = full
+
+
+def read(path, default=None):
+    try:
+        with open(path) as f:
+            return f.read().strip()
+    except OSError:
+        return default
+
+
+def soc(v):
+    if v <= OCV[0][0]:
+        return 0
+    for (v0, p0), (v1, p1) in zip(OCV, OCV[1:]):
+        if v <= v1:
+            return p0 + (p1 - p0) * (v - v0) / (v1 - v0)
+    return 100
+
+
+def bind(name):
+    src, dst = f"{RUN}/{name}", f"{PS}/battery/{name}"
+    with open(src, "w") as f:
+        f.write(read(dst, "") + "\n")
+    subprocess.run(["mount", "--bind", src, dst], check=True)
+
+
+def write(name, value):
+    tmp = f"{RUN}/{name}"
+    with open(tmp, "r+") as f:
+        f.seek(0)
+        f.write(f"{value}\n")
+        f.truncate()
+
+
+def main():
+    os.makedirs(RUN, exist_ok=True)
+    for name in ("capacity", "status"):
+        bind(name)
+    est, last = None, (None, None)
+    while True:
+        v = int(read(f"{PS}/bms/voltage_now", "0")) / 1e6
+        i = abs(int(read(f"{PS}/bms/current_now", "0"))) / 1e6
+        plugged = read(f"{PS}/usb/online") == "1" or read(f"{PS}/charger/online") == "1"
+        # kernel status is read from the charger: the battery node is covered
+        kstatus = read(f"{PS}/charger/status", "Unknown")
+        charging = plugged and kstatus == "Charging"
+        ocv = v - i * R_INTERNAL if charging else v + i * R_INTERNAL
+        p = soc(ocv)
+        if plugged and v >= FULL_V and i < 0.15:
+            p, status = 100, "Full"
+        elif charging:
+            status = "Charging"
+        elif plugged:
+            status = "Not charging"
+        else:
+            status = "Discharging"
+        # smooth out load spikes, but follow plug/unplug quickly
+        est = p if est is None or abs(p - est) > 15 else est * 0.7 + p * 0.3
+        cap = max(0, min(100, round(est)))
+        if (cap, status) != last:
+            write("capacity", cap)
+            write("status", status)
+            last = (cap, status)
+            # make UPower re-read the battery
+            try:
+                with open(f"{PS}/battery/uevent", "w") as f:
+                    f.write("change")
+            except OSError:
+                pass
+        time.sleep(20)
+
+
+if __name__ == "__main__":
+    main()

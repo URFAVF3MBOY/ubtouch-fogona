@@ -1,0 +1,57 @@
+From a1cc6ea9292f8229839a535f6d3725515c3db0ee Mon Sep 17 00:00:00 2001
+From: TheKit <thekit@disroot.org>
+Date: Sun, 9 Aug 2026 21:22:06 +0300
+Subject: [PATCH 14/18] binder: don't fail transactions when the LSM has no
+ secctx
+
+The cred_getsecid hook is implemented by SELinux, which Android relies
+on by default. With AppArmor as the active LSM instead, the secid stays
+0, AppArmor cannot map it back to a label, and
+security_secid_to_secctx() returns -EINVAL.
+
+Binder treated that as fatal, so every transaction to a node with
+txn_security_ctx was rejected with BR_FAILED_REPLY. That breaks the
+Android HALs which use those nodes.
+
+Send the transaction without a security context instead.
+
+Co-authored-by: Steffen Deusch <steffen@deusch.me>
+---
+ drivers/android/binder.c | 14 +++++++++-----
+ 1 file changed, 9 insertions(+), 5 deletions(-)
+
+diff --git a/drivers/android/binder.c b/drivers/android/binder.c
+index b06c14a9f..0db407ab7 100644
+--- a/drivers/android/binder.c
++++ b/drivers/android/binder.c
+@@ -3369,10 +3369,15 @@ static void binder_transaction(struct binder_proc *proc,
+ 		security_cred_getsecid(proc->cred, &secid);
+ 		ret = security_secid_to_secctx(secid, &secctx, &secctx_sz);
+ 		if (ret) {
+-			return_error = BR_FAILED_REPLY;
+-			return_error_param = ret;
+-			return_error_line = __LINE__;
+-			goto err_get_secctx_failed;
++			/*
++			 * cred_getsecid is implemented by SELinux, which
++			 * Android relies on by default. Without it the secid
++			 * stays 0 and the active LSM cannot resolve it. Send
++			 * the transaction without a security context instead
++			 * of failing it.
++			 */
++			secctx = NULL;
++			secctx_sz = 0;
+ 		}
+ 		added_size = ALIGN(secctx_sz, sizeof(u64));
+ 		extra_buffers_size += added_size;
+@@ -3828,7 +3833,6 @@ static void binder_transaction(struct binder_proc *proc,
+ err_bad_extra_size:
+ 	if (secctx)
+ 		security_release_secctx(secctx, secctx_sz);
+-err_get_secctx_failed:
+ 	kfree(tcomplete);
+ 	binder_stats_deleted(BINDER_STAT_TRANSACTION_COMPLETE);
+ err_alloc_tcomplete_failed:
+-- 
+2.53.0
+

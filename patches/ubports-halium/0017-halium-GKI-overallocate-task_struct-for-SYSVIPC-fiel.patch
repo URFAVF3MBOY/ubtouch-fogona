@@ -1,0 +1,231 @@
+From 40778358b8505ef27eeaee1616912b26f93c9735 Mon Sep 17 00:00:00 2001
+From: TheKit <thekit@disroot.org>
+Date: Sat, 16 May 2026 14:27:48 +0300
+Subject: [PATCH 17/18] (halium) GKI: overallocate task_struct for SYSVIPC
+ fields
+
+Place SYSVIPC state (sysv_sem, sysv_shm) in the trailing area of the
+overallocated task_struct slab slot, past the end of struct task_struct.
+
+This isolates the fields from ANDROID_KABI_RESERVE slots where precompiled
+GKI vendor modules may overrun and corrupt them (observed on Oplus devices).
+
+This allows to enable CONFIG_SYSVIPC=y without breaking module ABI
+(v2 version of the earlier patch that used Android ABI padding).
+---
+ include/linux/sched.h | 33 +++++++++++++++++++++++++++++----
+ include/linux/shm.h   |  2 +-
+ ipc/sem.c             | 12 ++++++------
+ ipc/shm.c             |  6 +++---
+ kernel/fork.c         | 29 ++++++++++++++++++++++++++++-
+ kernel/kcmp.c         |  4 ++--
+ 6 files changed, 69 insertions(+), 17 deletions(-)
+
+diff --git a/include/linux/sched.h b/include/linux/sched.h
+index 9c315023a..c25c59033 100644
+--- a/include/linux/sched.h
++++ b/include/linux/sched.h
+@@ -1073,10 +1073,15 @@ struct task_struct {
+ 
+ 	struct nameidata		*nameidata;
+ 
+-#ifdef CONFIG_SYSVIPC
+-	struct sysv_sem			sysvsem;
+-	struct sysv_shm			sysvshm;
+-#endif
++	/*
++	 * SYSVIPC state (sysv_sem / sysv_shm) is not a member of task_struct
++	 * in this build: precompiled GKI vendor modules occasionally overrun
++	 * the ANDROID_KABI_RESERVE slots, which would corrupt those fields if
++	 * they lived inside the struct. Instead, the task_struct slab slot is
++	 * overallocated and the SYSVIPC fields are placed past the end of the
++	 * struct. Access them via task_sysvsem() / task_sysvshm().
++	 */
++
+ #ifdef CONFIG_DETECT_HUNG_TASK
+ 	unsigned long			last_switch_count;
+ 	unsigned long			last_switch_time;
+@@ -1534,6 +1539,26 @@ struct task_struct {
+ 	 */
+ };
+ 
++#ifdef CONFIG_SYSVIPC
++/*
++ * SYSVIPC state lives in the trailing area of the task_struct slab slot,
++ * past sizeof(struct task_struct). The slab is overallocated in fork_init()
++ * so that vendor module overruns into ANDROID_KABI_RESERVE cannot reach it.
++ */
++extern size_t __task_sysvsem_offset;
++extern size_t __task_sysvshm_offset;
++
++static inline struct sysv_sem *task_sysvsem(struct task_struct *tsk)
++{
++	return (struct sysv_sem *)((char *)tsk + __task_sysvsem_offset);
++}
++
++static inline struct sysv_shm *task_sysvshm(struct task_struct *tsk)
++{
++	return (struct sysv_shm *)((char *)tsk + __task_sysvshm_offset);
++}
++#endif
++
+ static inline struct pid *task_pid(struct task_struct *task)
+ {
+ 	return task->thread_pid;
+diff --git a/include/linux/shm.h b/include/linux/shm.h
+index d8e69aed3..2f8b86b81 100644
+--- a/include/linux/shm.h
++++ b/include/linux/shm.h
+@@ -18,7 +18,7 @@ long do_shmat(int shmid, char __user *shmaddr, int shmflg, unsigned long *addr,
+ 	      unsigned long shmlba);
+ bool is_file_shm_hugepages(struct file *file);
+ void exit_shm(struct task_struct *task);
+-#define shm_init_task(task) INIT_LIST_HEAD(&(task)->sysvshm.shm_clist)
++#define shm_init_task(task) INIT_LIST_HEAD(&task_sysvshm(task)->shm_clist)
+ #else
+ struct sysv_shm {
+ 	/* empty */
+diff --git a/ipc/sem.c b/ipc/sem.c
+index c1f3ca244..b27ab3228 100644
+--- a/ipc/sem.c
++++ b/ipc/sem.c
+@@ -1853,7 +1853,7 @@ static inline int get_undo_list(struct sem_undo_list **undo_listp)
+ {
+ 	struct sem_undo_list *undo_list;
+ 
+-	undo_list = current->sysvsem.undo_list;
++	undo_list = task_sysvsem(current)->undo_list;
+ 	if (!undo_list) {
+ 		undo_list = kzalloc(sizeof(*undo_list), GFP_KERNEL_ACCOUNT);
+ 		if (undo_list == NULL)
+@@ -1862,7 +1862,7 @@ static inline int get_undo_list(struct sem_undo_list **undo_listp)
+ 		refcount_set(&undo_list->refcnt, 1);
+ 		INIT_LIST_HEAD(&undo_list->list_proc);
+ 
+-		current->sysvsem.undo_list = undo_list;
++		task_sysvsem(current)->undo_list = undo_list;
+ 	}
+ 	*undo_listp = undo_list;
+ 	return 0;
+@@ -2318,9 +2318,9 @@ int copy_semundo(unsigned long clone_flags, struct task_struct *tsk)
+ 		if (error)
+ 			return error;
+ 		refcount_inc(&undo_list->refcnt);
+-		tsk->sysvsem.undo_list = undo_list;
++		task_sysvsem(tsk)->undo_list = undo_list;
+ 	} else
+-		tsk->sysvsem.undo_list = NULL;
++		task_sysvsem(tsk)->undo_list = NULL;
+ 
+ 	return 0;
+ }
+@@ -2341,10 +2341,10 @@ void exit_sem(struct task_struct *tsk)
+ {
+ 	struct sem_undo_list *ulp;
+ 
+-	ulp = tsk->sysvsem.undo_list;
++	ulp = task_sysvsem(tsk)->undo_list;
+ 	if (!ulp)
+ 		return;
+-	tsk->sysvsem.undo_list = NULL;
++	task_sysvsem(tsk)->undo_list = NULL;
+ 
+ 	if (!refcount_dec_and_test(&ulp->refcnt))
+ 		return;
+diff --git a/ipc/shm.c b/ipc/shm.c
+index 048eb183b..bde18f1a5 100644
+--- a/ipc/shm.c
++++ b/ipc/shm.c
+@@ -431,12 +431,12 @@ void exit_shm(struct task_struct *task)
+ 
+ 		task_lock(task);
+ 
+-		if (list_empty(&task->sysvshm.shm_clist)) {
++		if (list_empty(&task_sysvshm(task)->shm_clist)) {
+ 			task_unlock(task);
+ 			break;
+ 		}
+ 
+-		shp = list_first_entry(&task->sysvshm.shm_clist, struct shmid_kernel,
++		shp = list_first_entry(&task_sysvshm(task)->shm_clist, struct shmid_kernel,
+ 				shm_clist);
+ 
+ 		/*
+@@ -775,7 +775,7 @@ static int newseg(struct ipc_namespace *ns, struct ipc_params *params)
+ 	shp->ns = ns;
+ 
+ 	task_lock(current);
+-	list_add(&shp->shm_clist, &current->sysvshm.shm_clist);
++	list_add(&shp->shm_clist, &task_sysvshm(current)->shm_clist);
+ 	task_unlock(current);
+ 
+ 	/*
+diff --git a/kernel/fork.c b/kernel/fork.c
+index 0ca0dfd15..598465821 100644
+--- a/kernel/fork.c
++++ b/kernel/fork.c
+@@ -850,6 +850,16 @@ static void set_max_threads(unsigned int max_threads_suggested)
+ int arch_task_struct_size __read_mostly;
+ #endif
+ 
++#ifdef CONFIG_SYSVIPC
++/*
++ * Offsets (within the overallocated task_struct slab slot) of the SYSVIPC
++ * fields that we deliberately keep outside struct task_struct. See the
++ * comment in include/linux/sched.h.
++ */
++size_t __task_sysvsem_offset __ro_after_init;
++size_t __task_sysvshm_offset __ro_after_init;
++#endif
++
+ #ifndef CONFIG_ARCH_TASK_STRUCT_ALLOCATOR
+ static void task_struct_whitelist(unsigned long *offset, unsigned long *size)
+ {
+@@ -876,11 +886,28 @@ void __init fork_init(void)
+ #endif
+ 	int align = max_t(int, L1_CACHE_BYTES, ARCH_MIN_TASKALIGN);
+ 	unsigned long useroffset, usersize;
++	size_t task_struct_size = arch_task_struct_size;
++
++#ifdef CONFIG_SYSVIPC
++	/*
++	 * Reserve room for sysv_sem / sysv_shm past the end of struct
++	 * task_struct. Precompiled GKI vendor modules sometimes overrun the
++	 * ANDROID_KABI_RESERVE slots; keeping the SYSVIPC state outside the
++	 * struct prevents such overruns from corrupting it.
++	 */
++	task_struct_size = ALIGN(task_struct_size, __alignof__(struct sysv_sem));
++	__task_sysvsem_offset = task_struct_size;
++	task_struct_size += sizeof(struct sysv_sem);
++
++	task_struct_size = ALIGN(task_struct_size, __alignof__(struct sysv_shm));
++	__task_sysvshm_offset = task_struct_size;
++	task_struct_size += sizeof(struct sysv_shm);
++#endif
+ 
+ 	/* create a slab on which task_structs can be allocated */
+ 	task_struct_whitelist(&useroffset, &usersize);
+ 	task_struct_cachep = kmem_cache_create_usercopy("task_struct",
+-			arch_task_struct_size, align,
++			task_struct_size, align,
+ 			SLAB_PANIC|SLAB_ACCOUNT,
+ 			useroffset, usersize, NULL);
+ #endif
+diff --git a/kernel/kcmp.c b/kernel/kcmp.c
+index 5353edfad..6eb264c87 100644
+--- a/kernel/kcmp.c
++++ b/kernel/kcmp.c
+@@ -196,8 +196,8 @@ SYSCALL_DEFINE5(kcmp, pid_t, pid1, pid_t, pid2, int, type,
+ 		break;
+ 	case KCMP_SYSVSEM:
+ #ifdef CONFIG_SYSVIPC
+-		ret = kcmp_ptr(task1->sysvsem.undo_list,
+-			       task2->sysvsem.undo_list,
++		ret = kcmp_ptr(task_sysvsem(task1)->undo_list,
++			       task_sysvsem(task2)->undo_list,
+ 			       KCMP_SYSVSEM);
+ #else
+ 		ret = -EOPNOTSUPP;
+-- 
+2.53.0
+

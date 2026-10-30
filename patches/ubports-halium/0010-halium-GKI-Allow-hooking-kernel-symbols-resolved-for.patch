@@ -1,0 +1,97 @@
+From 97579a7292cf920746ad6face923881e95991b95 Mon Sep 17 00:00:00 2001
+From: TheKit <thekit@disroot.org>
+Date: Sun, 5 Jul 2026 18:14:25 +0300
+Subject: [PATCH 10/18] (halium) GKI: Allow hooking kernel symbols resolved for
+ modules
+
+The intention is to maintain a list of quirks and attempt to
+workaround bugs in precompiled vendor modules that occur once
+the environment is different from regular Android setup.
+---
+ kernel/Makefile          |  2 +-
+ kernel/gki_quirks.c      | 30 ++++++++++++++++++++++++++++++
+ kernel/module-internal.h |  3 +++
+ kernel/module.c          |  3 ++-
+ 4 files changed, 36 insertions(+), 2 deletions(-)
+ create mode 100644 kernel/gki_quirks.c
+
+diff --git a/kernel/Makefile b/kernel/Makefile
+index e36ff365a..a290bf69b 100644
+--- a/kernel/Makefile
++++ b/kernel/Makefile
+@@ -64,7 +64,7 @@ ifneq ($(CONFIG_SMP),y)
+ obj-y += up.o
+ endif
+ obj-$(CONFIG_UID16) += uid16.o
+-obj-$(CONFIG_MODULES) += module.o
++obj-$(CONFIG_MODULES) += module.o gki_quirks.o
+ obj-$(CONFIG_MODULE_SIG) += module_signing.o
+ obj-$(CONFIG_MODULE_SIG_FORMAT) += module_signature.o
+ obj-$(CONFIG_MODULE_SIG_PROTECT) += gki_module.o
+diff --git a/kernel/gki_quirks.c b/kernel/gki_quirks.c
+new file mode 100644
+index 000000000..45a2ec8a0
+--- /dev/null
++++ b/kernel/gki_quirks.c
+@@ -0,0 +1,30 @@
++// SPDX-License-Identifier: GPL-2.0-only
++
++#include <linux/module.h>
++
++struct gki_quirks_hook {
++	const char *module_name;
++	const char *symbol_name;
++	void *func;
++};
++
++static const struct gki_quirks_hook gki_quirks_list[] = {
++	{ } /* terminating entry must be last */
++};
++
++unsigned long gki_quirks_get_hooked_symbol_value(const struct module *mod,
++				const char *name, unsigned long value)
++{
++	const struct gki_quirks_hook *hook;
++
++	for (hook = gki_quirks_list; hook->module_name; hook++) {
++		if (strcmp(mod->name, hook->module_name) == 0
++			&& strcmp(name, hook->symbol_name) == 0) {
++			pr_info("gki_quirks: hooking %s symbol for %s module\n",
++					name, mod->name);
++			return (unsigned long)hook->func;
++		}
++	}
++
++	return value;
++}
+diff --git a/kernel/module-internal.h b/kernel/module-internal.h
+index 9b0405125..26ee1fb65 100644
+--- a/kernel/module-internal.h
++++ b/kernel/module-internal.h
+@@ -30,6 +30,9 @@ struct load_info {
+ 
+ extern int mod_verify_sig(const void *mod, struct load_info *info);
+ 
++unsigned long gki_quirks_get_hooked_symbol_value(const struct module *mod,
++				const char *name, unsigned long value);
++
+ #ifdef CONFIG_MODULE_SIG_PROTECT
+ extern bool gki_is_module_exported_symbol(const char *name);
+ extern bool gki_is_module_protected_symbol(const char *name);
+diff --git a/kernel/module.c b/kernel/module.c
+index bcadcef31..eec0220f4 100644
+--- a/kernel/module.c
++++ b/kernel/module.c
+@@ -2360,7 +2360,8 @@ static int simplify_symbols(struct module *mod, const struct load_info *info)
+ 			ksym = resolve_symbol_wait(mod, info, name);
+ 			/* Ok if resolved.  */
+ 			if (ksym && !IS_ERR(ksym)) {
+-				sym[i].st_value = kernel_symbol_value(ksym);
++				sym[i].st_value = gki_quirks_get_hooked_symbol_value(mod, name,
++					kernel_symbol_value(ksym));
+ 				break;
+ 			}
+ 
+-- 
+2.53.0
+

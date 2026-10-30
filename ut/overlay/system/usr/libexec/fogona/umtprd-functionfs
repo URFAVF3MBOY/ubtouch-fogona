@@ -1,0 +1,8 @@
+#!/bin/sh
+# Create the FunctionFS MTP function in usb-moded's gadget and mount it, so
+# umtprd can write its descriptors before usb-moded binds the "mtp" mode.
+set -e
+G=/sys/kernel/config/usb_gadget/g1
+for _ in $(seq 1 30); do [ -d $G/functions ] && break; sleep 1; done
+mkdir -p $G/functions/ffs.mtp /dev/usb-ffs/mtp
+mountpoint -q /dev/usb-ffs/mtp || mount -t functionfs mtp /dev/usb-ffs/mtp

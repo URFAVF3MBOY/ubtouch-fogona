@@ -1,0 +1,12 @@
+[Unit]
+Description=fogona responsiveness tuning (input boost, GPU floor)
+After=lxc-android-config.service
+
+[Service]
+Type=oneshot
+# let Android's post_boot script finish first
+ExecStartPre=/bin/sleep 60
+ExecStart=/usr/libexec/fogona/tune
+
+[Install]
+WantedBy=multi-user.target

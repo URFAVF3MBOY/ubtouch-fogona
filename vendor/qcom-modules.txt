@@ -1,0 +1,9 @@
+# Qualcomm out-of-tree module dirs (relative to the Android tree root) and make options.
+# @TOP@ = Android tree root, @KSRC@ = kernel source. Options mirror what each repo's
+# Android.mk passes (with ANDROID_BUILD_TOP set, the Kbuilds don't pick defaults).
+# mm-drivers (msm_ext_display/sync_fence/hw_fence) aren't shipped on stock fogona.
+vendor/qcom/opensource/securemsm-kernel  SSG_MODULE_ROOT=@TOP@/vendor/qcom/opensource/securemsm-kernel
+vendor/qcom/opensource/mmrm-driver       MMRM_ROOT=@TOP@/vendor/qcom/opensource/mmrm-driver
+vendor/qcom/opensource/display-drivers   DISPLAY_ROOT=@TOP@/vendor/qcom/opensource/display-drivers CONFIG_DRM_MSM=m MODNAME=msm_drm BOARD_PLATFORM=bengal KCFLAGS=-Wframe-larger-than=4096
+vendor/qcom/opensource/graphics-kernel   KGSL_PATH=@TOP@/vendor/qcom/opensource/graphics-kernel CONFIG_QCOM_KGSL=m KERNEL_SRC=@KSRC@
+vendor/qcom/opensource/video-driver      VIDEO_ROOT=@TOP@/vendor/qcom/opensource/video-driver
